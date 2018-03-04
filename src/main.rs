@@ -1,4 +1,4 @@
-#![feature(iterator_try_fold)]
+#![feature(io)]
 #![recursion_limit = "1024"] // `error_chain!` can recurse deeply
 #[macro_use]
 extern crate clap;
@@ -11,6 +11,7 @@ use std::io::Write;
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::thread;
+use std::char::REPLACEMENT_CHARACTER;
 
 use colored::*;
 
@@ -19,12 +20,7 @@ use colored::*;
 // `error_chain!` creates.
 mod errors {
   // Create the Error, ErrorKind, ResultExt, and Result types
-  error_chain!{
-    // foreign_links {
-    //     Fmt(::std::fmt::Error);
-    //     Io(::std::io::Error) #[cfg(unix)];
-    // }
-  }
+  error_chain!{}
 }
 // This only gives access within this module. Make this `pub use errors::*;`
 // instead if the types must be accessible from other modules (e.g., within
@@ -63,7 +59,7 @@ fn main() {
         for stream in listener.incoming() {
           println!("{} incoming connection", "note:".yellow().bold());
           let mut writer = stream.unwrap();
-          let reader = writer.try_clone().unwrap();
+          let reader : TcpStream = writer.try_clone().unwrap();
           // The writer.
           // We use 'move' because 'writer' will be mutated. Each thread
           // returns an Option<Error> so that we can know when they errored.
@@ -82,10 +78,11 @@ fn main() {
           });
           // The reader.
           thread::spawn(|| -> Result<()> {
-            for b in reader.bytes() {
-              let b = b.chain_err(|| "failed reading a byte")?;
-              print!("{}", b as char);
+            for c in reader.chars() {
+              print!("{}", c.unwrap_or(REPLACEMENT_CHARACTER))
             }
+            // decode_utf8(reader.bytes().map(|f| f).into_iter())
+            //   .for_each(|c| ;
             Ok(())
           });
         }
@@ -115,9 +112,8 @@ fn main() {
         });
         // The reader.
         thread::spawn(|| -> Result<()> {
-          for b in reader.bytes() {
-            let b = b.chain_err(|| "failed to read a byte")?;
-            print!("{}", b as char)
+          for c in reader.chars() {
+              print!("{}", c.unwrap_or(REPLACEMENT_CHARACTER))
           }
           Ok(())
         });
