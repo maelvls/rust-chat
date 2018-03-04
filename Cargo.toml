@@ -1,6 +1,10 @@
 [package]
 name = "rust-chat"
+description = "A rust telnet-like tiny chat."
 version = "0.1.0"
-authors = ["julien"]
+authors = ["julien", "Maël Valais <mael.valais@gmail.com>"]
 
 [dependencies]
+clap = "2.30.0"
+error-chain = "0.11.0"
+colored = "1.6.0"
