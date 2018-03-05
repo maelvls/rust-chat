@@ -1,5 +1,7 @@
 #![feature(io)]
 #![recursion_limit = "1024"] // `error_chain!` can recurse deeply
+#![feature(vec_remove_item)]
+
 #[macro_use]
 extern crate clap;
 extern crate colored;
@@ -12,6 +14,7 @@ use std::net::TcpListener;
 use std::net::TcpStream;
 use std::thread;
 use std::char::REPLACEMENT_CHARACTER;
+use std::sync::mpsc;
 
 use colored::*;
 
@@ -26,6 +29,24 @@ mod errors {
 // instead if the types must be accessible from other modules (e.g., within
 // a `links` section).
 use errors::*;
+
+/// A Sender. Allows us to remember to which channel we should write.
+pub struct Writer {
+  sender: mpsc::Sender<String>,
+  id: usize,
+}
+
+/// An action to send to the main_writer.
+pub enum Action {
+  ToWriters(String, Writer),
+  AddWriter(Writer),
+  RmWriter(Writer),
+}
+impl PartialEq for Writer {
+  fn eq(self: &Self, rhs: &Self) -> bool {
+    self.id == rhs.id
+  }
+}
 
 fn main() {
   let args: clap::ArgMatches = clap_app!(rustchat =>
@@ -52,37 +73,108 @@ fn main() {
         let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
           .chain_err(|| format!("port '{}' aleady used", port.yellow()))?;
         println!("{} listening started", "ready:".green().bold());
-        for stream in listener.incoming() {
-          println!("{} incoming connection", "note:".yellow().bold());
-          let mut writer = stream.unwrap();
-          let reader : TcpStream = writer.try_clone().unwrap();
-          // The writer.
-          // We use 'move' because 'writer' will be mutated. Each thread
-          // returns an Option<Error> so that we can know when they errored.
+
+        let (reader_send, mut to_main_writer) = mpsc::channel();
+
+        // The 'main_writer' is the one who takes input from one of
+        // incoming connections (from one of the readers) and send them
+        // along to the other connections (passing a message to all the
+        // writers).
+        let _main_writer = thread::spawn(move || -> Result<()> {
+          let mut writers: Vec<Writer> = Vec::new();
+          while let Some(act) = to_main_writer.recv().ok() {
+            match act {
+              Action::ToWriters(msg, from) => {
+                writers.iter().filter(|writer| **writer != from).for_each(|writer| {
+                  println!(
+                    "{} ask writer n°{} to send '{}'",
+                    "debug:".bright_black().bold(),
+                    writer.id,
+                    msg.yellow()
+                  );
+                  writer
+                    .sender
+                    .send(msg.clone()) // TODO: why is clone required?
+                    .unwrap_or_else(|_err| eprintln!("{} cannot send to n°{}", "error:".red().bold(), writer.id))
+                })
+              }
+              Action::AddWriter(w) => writers.push(w),
+              Action::RmWriter(w) => {
+                writers.remove_item(&w);
+              }
+            }
+          }
+          Ok(())
+        });
+
+        for (id, stream) in listener.incoming().enumerate() {
+          // Each reader thread must be able to send its received message
+          // to the main_writer. As it is a all-to-one communication to the
+          // main_chan, we can reuse the same sender.
+          let reader_send = reader_send.clone();
+
+          // On the contrary, sending a message from the main_writer to all
+          // the writer threads is a one-to-all communication. As it is not
+          // provided by the std lib, we will create one channel per writer.
+          let (writer_send, writer_recv) = mpsc::channel();
+
+          // Tell the main_writer that we got a new writer he should know of.
+          reader_send
+            .send(Action::AddWriter(Writer {
+              sender: writer_send.clone(),
+              id,
+            }))
+            .chain_err(|| "couldn't add writer to the main writer (wtf this err msg?)")?;
+
+          println!("{} incoming connection n°{}", "note:".yellow().bold(), id);
+
+          let mut writer: TcpStream = stream.unwrap();
+          let mut reader: TcpStream = writer.try_clone().unwrap();
+
+          // The writer for this incoming connection. He is responsible for
+          // sending the messages given by main_writer to the connection.
           thread::spawn(move || -> Result<()> {
-            writer
-              .write(format!("{} ready!\r\n", "server:".purple()).as_bytes())
-              .chain_err(|| "could not write to client")?;
-            let stdin = std::io::stdin();
-            for b in stdin.bytes() {
-              let b = b.chain_err(|| "failed to read byte from stdin")?;
-              writer
-                .write(&[b])
-                .chain_err(|| format!("failed to write byte '{}'", b as char))?;
+            writeln!(writer, "server: connected as n°{}", id).chain_err(|| "")?;
+            loop {
+              let msg = writer_recv.recv().chain_err(|| "writer errored")?;
+              writeln!(writer, "{}", msg)
+                .chain_err(|| format!("error writing to connection n°{}", id))?;
+              println!(
+                "{} writer n°{} emited '{}'",
+                "debug:".bright_black().bold(),
+                id,
+                msg.yellow()
+              );
             }
-            Ok(())
           });
-          // The reader.
-          thread::spawn(|| -> Result<()> {
+
+          // The reader for this incoming connection. He receives the messages
+          // from the connection and passes them to the main_writer.
+          thread::spawn(move || -> Result<()> {
+            let mut buf = String::new();
             for c in reader.chars() {
-              print!("{}", c.unwrap_or(REPLACEMENT_CHARACTER))
+              match c.unwrap_or(std::char::REPLACEMENT_CHARACTER) {
+                '\n' => {
+                  println!(
+                    "{} reader n°{} received '{}'",
+                    "debug:".bright_black().bold(),
+                    id,
+                    buf.yellow()
+                  );
+                  let sender = writer_send.clone();
+                  reader_send
+                    .send(Action::ToWriters(buf.clone(), Writer { sender, id }))
+                    .chain_err(|| "")?;
+                  buf.clear();
+                }
+                c => buf.push(c),
+              }
             }
-            // decode_utf8(reader.bytes().map(|f| f).into_iter())
-            //   .for_each(|c| ;
             Ok(())
           });
         }
       }
+
       ("client", Some(subarg)) => {
         let (ipv4, port) = (
           subarg.value_of("IPV4").unwrap(),
@@ -108,8 +200,15 @@ fn main() {
         });
         // The reader.
         thread::spawn(|| -> Result<()> {
+          let mut buf = String::new();
           for c in reader.chars() {
-              print!("{}", c.unwrap_or(REPLACEMENT_CHARACTER))
+            match c.unwrap_or(REPLACEMENT_CHARACTER) {
+              '\n' => {
+                println!("{} {}", "remote:".blue().bold(), buf);
+                buf.clear()
+              }
+              c => buf.push(c),
+            }
           }
           Ok(())
         });
@@ -127,8 +226,7 @@ fn main() {
 
   // Run and handle errors.
   if let Err(ref e) = run() {
-    use std::io::Write;
-    let stderr = &mut ::std::io::stderr();
+    let stderr = &mut std::io::stderr();
     let errmsg = "Error writing to stderr";
     writeln!(stderr, "{} {}", "error:".red().bold(), e).expect(errmsg);
     for e in e.iter().skip(1) {
@@ -138,6 +236,6 @@ fn main() {
     if let Some(backtrace) = e.backtrace() {
       writeln!(stderr, "{} {:?}", "backtrace:".blue().bold(), backtrace).expect(errmsg);
     }
-    ::std::process::exit(1);
+    std::process::exit(1);
   }
 }
