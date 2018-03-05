@@ -31,12 +31,6 @@ fn main() {
   let args: clap::ArgMatches = clap_app!(rustchat =>
       (version: env!("CARGO_PKG_VERSION"))
       (about: env!("CARGO_PKG_DESCRIPTION"))
-      (@setting TrailingVarArg)
-      (@setting SubcommandRequiredElseHelp)
-      (@setting ColorAuto)
-      (@setting GlobalVersion)
-      (@setting DeriveDisplayOrder)
-      (@setting UnifiedHelpMessage)
       (@subcommand client =>
           (about: "run as client")
           (@arg IPV4: +required "IP address to use")
@@ -44,6 +38,8 @@ fn main() {
       (@subcommand server =>
           (about: "run as server")
           (@arg PORT: +required "Port"))
+      (@setting TrailingVarArg) (@setting GlobalVersion)
+      (@setting SubcommandRequiredElseHelp) (@setting DeriveDisplayOrder)
       // (@arg debug: -d ... "Sets the level of debugging information")
     ).get_matches();
 
