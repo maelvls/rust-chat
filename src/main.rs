@@ -15,28 +15,22 @@ use std::net::TcpStream;
 use std::thread;
 use std::char::REPLACEMENT_CHARACTER;
 use std::sync::mpsc;
-
 use colored::*;
 
-// We'll put our errors in an `errors` module, and other modules in
-// this crate will `use errors::*;` to get access to everything
-// `error_chain!` creates.
+/// Allows us to use .chain_err(). See https://docs.rs/error-chain.
 mod errors {
-  // Create the Error, ErrorKind, ResultExt, and Result types
   error_chain!{}
 }
-// This only gives access within this module. Make this `pub use errors::*;`
-// instead if the types must be accessible from other modules (e.g., within
-// a `links` section).
 use errors::*;
 
-/// A Sender. Allows us to remember to which channel we should write.
+/// This Writer struct holds the information on a writer-thread so that
+/// main_writer is able to send messages to all writers.
 pub struct Writer {
   sender: mpsc::Sender<String>,
   id: usize,
 }
 
-/// An action to send to the main_writer.
+/// Contains the action that main_writer should execute.
 pub enum Action {
   ToWriters(String, Writer),
   AddWriter(Writer),
@@ -85,18 +79,21 @@ fn main() {
           while let Some(act) = to_main_writer.recv().ok() {
             match act {
               Action::ToWriters(msg, from) => {
-                writers.iter().filter(|writer| **writer != from).for_each(|writer| {
-                  println!(
-                    "{} ask writer n°{} to send '{}'",
-                    "debug:".bright_black().bold(),
-                    writer.id,
-                    msg.yellow()
-                  );
-                  writer
+                writers
+                  .iter()
+                  .filter(|writer| **writer != from)
+                  .for_each(|writer| {
+                    println!(
+                      "{} ask writer n°{} to send '{}'",
+                      "debug:".bright_black().bold(),
+                      writer.id,
+                      msg.yellow()
+                    );
+                    writer
                     .sender
                     .send(msg.clone()) // TODO: why is clone required?
                     .unwrap_or_else(|_err| eprintln!("{} cannot send to n°{}", "error:".red().bold(), writer.id))
-                })
+                  })
               }
               Action::AddWriter(w) => writers.push(w),
               Action::RmWriter(w) => {
