@@ -5,6 +5,7 @@ version = "0.1.0"
 authors = ["julien", "Maël Valais <mael.valais@gmail.com>"]
 
 [dependencies]
-clap = "2.30.0"
-error-chain = "0.11.0"
-colored = "1.6.0"
+clap = "2.30"
+error-chain = "0.11"
+colored = "1.6"
+log = "0.4"
