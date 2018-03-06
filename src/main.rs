@@ -18,7 +18,7 @@ use std::thread;
 use std::char::REPLACEMENT_CHARACTER;
 use std::sync::mpsc;
 use colored::Colorize;
-use log::{Level, Metadata, Record, LevelFilter};
+use log::{Level, LevelFilter, Metadata, Record};
 
 /// Allows us to use .chain_err(). See https://docs.rs/error-chain.
 mod errors {
@@ -107,16 +107,12 @@ fn main() {
           while let Some(act) = to_main_writer.recv().ok() {
             match act {
               Action::ToWriters(msg, from) => {
-                writers
-                  .iter()
-                  .filter(|writer| **writer != from)
-                  .for_each(|writer| {
-                    debug!("ask writer n°{} to send '{}'", writer.id, msg.yellow());
-                    writer
-                    .sender
-                    .send(msg.clone()) // TODO: why is clone required?
-                    .unwrap_or_else(|_err| error!("cannot send to n°{}", writer.id))
-                  })
+                writers.iter().filter(|to| **to != from).for_each(|to| {
+                  debug!("ask writer n°{} to send '{}'", to.id, msg.yellow());
+                  to.sender
+                    .send(msg.clone()) // Idk why this clone is required
+                    .unwrap_or_else(|_err| error!("cannot send to n°{}", to.id))
+                })
               }
               Action::AddWriter(w) => writers.push(w),
               Action::RmWriter(w) => {
