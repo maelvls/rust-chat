@@ -7,6 +7,8 @@ extern crate clap;
 extern crate colored;
 #[macro_use]
 extern crate error_chain;
+#[macro_use]
+extern crate log;
 
 use std::io::Read;
 use std::io::Write;
@@ -15,7 +17,8 @@ use std::net::TcpStream;
 use std::thread;
 use std::char::REPLACEMENT_CHARACTER;
 use std::sync::mpsc;
-use colored::*;
+use colored::Colorize;
+use log::{Level, Metadata, Record, LevelFilter};
 
 /// Allows us to use .chain_err(). See https://docs.rs/error-chain.
 mod errors {
@@ -42,7 +45,32 @@ impl PartialEq for Writer {
   }
 }
 
+struct OurLogger;
+
+impl log::Log for OurLogger {
+  fn enabled(&self, _: &Metadata) -> bool {
+    true
+  }
+
+  fn log(&self, rec: &Record) {
+    if self.enabled(rec.metadata()) {
+      match rec.level() {
+        Level::Error => eprintln!("{} {}", "error:".red().bold(), rec.args()),
+        Level::Warn => eprintln!("{} {}", "warn:".yellow().bold(), rec.args()),
+        Level::Info => eprintln!("{} {}", "info:".yellow().bold(), rec.args()),
+        Level::Debug => eprintln!("{} {}", "debug:".bright_black().bold(), rec.args()),
+        Level::Trace => eprintln!("{} {}", "trace:".blue().bold(), rec.args()),
+      }
+    }
+  }
+
+  fn flush(&self) {}
+}
+
 fn main() {
+  log::set_logger(&OurLogger).unwrap();
+  log::set_max_level(LevelFilter::Trace);
+
   let args: clap::ArgMatches = clap_app!(rustchat =>
       (version: env!("CARGO_PKG_VERSION"))
       (about: env!("CARGO_PKG_DESCRIPTION"))
@@ -66,7 +94,7 @@ fn main() {
         let port = subarg.value_of("PORT").unwrap();
         let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
           .chain_err(|| format!("port '{}' aleady used", port.yellow()))?;
-        println!("{} listening started", "ready:".green().bold());
+        info!("listening started");
 
         let (reader_send, mut to_main_writer) = mpsc::channel();
 
@@ -83,16 +111,11 @@ fn main() {
                   .iter()
                   .filter(|writer| **writer != from)
                   .for_each(|writer| {
-                    println!(
-                      "{} ask writer n°{} to send '{}'",
-                      "debug:".bright_black().bold(),
-                      writer.id,
-                      msg.yellow()
-                    );
+                    debug!("ask writer n°{} to send '{}'", writer.id, msg.yellow());
                     writer
                     .sender
                     .send(msg.clone()) // TODO: why is clone required?
-                    .unwrap_or_else(|_err| eprintln!("{} cannot send to n°{}", "error:".red().bold(), writer.id))
+                    .unwrap_or_else(|_err| error!("cannot send to n°{}", writer.id))
                   })
               }
               Action::AddWriter(w) => writers.push(w),
@@ -123,7 +146,7 @@ fn main() {
             }))
             .chain_err(|| "couldn't add writer to the main writer (wtf this err msg?)")?;
 
-          println!("{} incoming connection n°{}", "note:".yellow().bold(), id);
+          info!("incoming connection n°{}", id);
 
           let mut writer: TcpStream = stream.unwrap();
           let mut reader: TcpStream = writer.try_clone().unwrap();
@@ -136,12 +159,7 @@ fn main() {
               let msg = writer_recv.recv().chain_err(|| "writer errored")?;
               writeln!(writer, "{}", msg)
                 .chain_err(|| format!("error writing to connection n°{}", id))?;
-              println!(
-                "{} writer n°{} emited '{}'",
-                "debug:".bright_black().bold(),
-                id,
-                msg.yellow()
-              );
+              debug!("writer n°{} emited '{}'", id, msg.yellow());
             }
           });
 
@@ -152,12 +170,7 @@ fn main() {
             for c in reader.chars() {
               match c.unwrap_or(std::char::REPLACEMENT_CHARACTER) {
                 '\n' => {
-                  println!(
-                    "{} reader n°{} received '{}'",
-                    "debug:".bright_black().bold(),
-                    id,
-                    buf.yellow()
-                  );
+                  debug!("reader n°{} received '{}'", id, buf.yellow());
                   let sender = writer_send.clone();
                   reader_send
                     .send(Action::ToWriters(buf.clone(), Writer { sender, id }))
@@ -183,7 +196,7 @@ fn main() {
           .try_clone()
           .chain_err(|| "impossibe to clone the TCP stream (i.e., the socket")?;
 
-        println!("{} you can start typing", "ready:".green().bold());
+        info!("you can start typing");
         // The writer.
         let thread_writer = thread::spawn(move || -> Result<()> {
           let stdin = std::io::stdin();
@@ -223,15 +236,13 @@ fn main() {
 
   // Run and handle errors.
   if let Err(ref e) = run() {
-    let stderr = &mut std::io::stderr();
-    let errmsg = "Error writing to stderr";
-    writeln!(stderr, "{} {}", "error:".red().bold(), e).expect(errmsg);
+    error!("{}", e);
     for e in e.iter().skip(1) {
-      writeln!(stderr, "{} {}", "caused by:".bright_black().bold(), e).expect(errmsg);
+      error!("{} {}", "caused by:".bright_black().bold(), e);
     }
     // Use `RUST_BACKTRACE=1` to enable the backtraces.
     if let Some(backtrace) = e.backtrace() {
-      writeln!(stderr, "{} {:?}", "backtrace:".blue().bold(), backtrace).expect(errmsg);
+      error!("{} {:?}", "backtrace:".blue().bold(), backtrace);
     }
     std::process::exit(1);
   }
