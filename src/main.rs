@@ -10,15 +10,15 @@ extern crate error_chain;
 #[macro_use]
 extern crate log;
 
+use colored::Colorize;
+use log::{Level, LevelFilter, Metadata, Record};
+use std::char::REPLACEMENT_CHARACTER;
 use std::io::Read;
 use std::io::Write;
 use std::net::TcpListener;
 use std::net::TcpStream;
-use std::thread;
-use std::char::REPLACEMENT_CHARACTER;
 use std::sync::mpsc;
-use colored::Colorize;
-use log::{Level, LevelFilter, Metadata, Record};
+use std::thread;
 
 /// Allows us to use .chain_err(). See https://docs.rs/error-chain.
 mod errors {
@@ -45,13 +45,12 @@ impl PartialEq for Writer {
   }
 }
 
+/// Allows us to use `error!()`, `info!()`...
 struct OurLogger;
-
 impl log::Log for OurLogger {
   fn enabled(&self, _: &Metadata) -> bool {
     true
   }
-
   fn log(&self, rec: &Record) {
     if self.enabled(rec.metadata()) {
       match rec.level() {
@@ -63,7 +62,6 @@ impl log::Log for OurLogger {
       }
     }
   }
-
   fn flush(&self) {}
 }
 
