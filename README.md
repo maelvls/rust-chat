@@ -4,6 +4,8 @@ I wrote this small chat-like pair of server/client in order to learn Rust (borro
 lifelines, threads, generics). Rust is kinda hard at first glance (lots of syntax) but its
 approach in tooling and language is extremely interesting.
 
+![licecap_recording](https://user-images.githubusercontent.com/2195781/58642489-bd8d4680-82fd-11e9-9496-c5eedba7b608.gif)
+
 [![screencast asciinema](https://user-images.githubusercontent.com/2195781/50637017-943bda80-0f58-11e9-80e0-882f71bbc118.gif)](https://asciinema.org/a/k63SVx2a2ATY9npFOnSvujTyL)
 
 😎 **Pros:**
