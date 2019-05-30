@@ -1,4 +1,3 @@
-#![feature(io)]
 #![recursion_limit = "1024"] // `error_chain!` can recurse deeply
 #![feature(vec_remove_item)]
 
@@ -12,7 +11,6 @@ extern crate log;
 
 use colored::Colorize;
 use log::{Level, LevelFilter, Metadata, Record};
-use std::char::REPLACEMENT_CHARACTER;
 use std::io::Read;
 use std::io::Write;
 use std::net::TcpListener;
@@ -22,7 +20,7 @@ use std::thread;
 
 /// Allows us to use .chain_err(). See https://docs.rs/error-chain.
 mod errors {
-  error_chain!{}
+  error_chain! {}
 }
 use errors::*;
 
@@ -70,19 +68,20 @@ fn main() {
   log::set_max_level(LevelFilter::Trace);
 
   let args: clap::ArgMatches = clap_app!(rustchat =>
-      (version: env!("CARGO_PKG_VERSION"))
-      (about: env!("CARGO_PKG_DESCRIPTION"))
-      (@subcommand client =>
-          (about: "run as client")
-          (@arg IPV4: +required "IP address to use")
-          (@arg PORT: +required "Port"))
-      (@subcommand server =>
-          (about: "run as server")
-          (@arg PORT: +required "Port"))
-      (@setting TrailingVarArg) (@setting GlobalVersion)
-      (@setting SubcommandRequiredElseHelp) (@setting DeriveDisplayOrder)
-      // (@arg debug: -d ... "Sets the level of debugging information")
-    ).get_matches();
+    (version: env!("CARGO_PKG_VERSION"))
+    (about: env!("CARGO_PKG_DESCRIPTION"))
+    (@subcommand client =>
+        (about: "run as client")
+        (@arg IPV4: +required "IP address to use")
+        (@arg PORT: +required "Port"))
+    (@subcommand server =>
+        (about: "run as server")
+        (@arg PORT: +required "Port"))
+    (@setting TrailingVarArg) (@setting GlobalVersion)
+    (@setting SubcommandRequiredElseHelp) (@setting DeriveDisplayOrder)
+    // (@arg debug: -d ... "Sets the level of debugging information")
+  )
+  .get_matches();
 
   // This 'run' function is like 'main' except it allows us to return a
   // Result type so that we can handle gracefully errors using chain_err.
@@ -161,22 +160,25 @@ fn main() {
           // from the connection and passes them to the main_writer.
           thread::spawn(move || -> Result<()> {
             let mut buf = String::new();
-            // Mael: Read::chars() has been removed. See:
+
+            // Note: `Read::chars()` has been removed. See:
             // https://github.com/rust-lang/rust/issues/27802#issuecomment-377537778
-            //Replacement: reader.read_to_string(&mut buf);
-            for c in reader.chars() {
-              match c.unwrap_or(std::char::REPLACEMENT_CHARACTER) {
-                '\n' => {
-                  debug!("reader n°{} received '{}'", id, buf.yellow());
-                  let sender = writer_send.clone();
-                  reader_send
-                    .send(Action::ToWriters(buf.clone(), Writer { sender, id }))
-                    .chain_err(|| "")?;
-                  buf.clear();
-                }
-                c => buf.push(c),
-              }
-            }
+            // I wanted a quick fix, so I used `::io::Read::read_to_string`
+            // but it does allow replacing wrong utf-8 code points with the
+            // replacement character (`�`). The good option would be to use
+            // the utf8 crate and mimic the `reader.chars()` behaviour.
+            reader
+              .read_to_string(&mut buf)
+              .chain_err(|| "utf8 unpacking went wrong")
+              .and_then(|_| {
+                debug!("reader n°{} received '{}'", id, buf.yellow());
+                let sender = writer_send.clone();
+                reader_send
+                  .send(Action::ToWriters(buf.clone(), Writer { sender, id }))
+                  .chain_err(|| "when sending to writers")?;
+                buf.clear();
+                Ok(buf.as_str())
+              })?;
             Ok(())
           });
         }
@@ -187,7 +189,7 @@ fn main() {
           subarg.value_of("IPV4").unwrap(),
           subarg.value_of("PORT").unwrap(),
         );
-        let reader = TcpStream::connect(format!("{}:{}", ipv4, port))
+        let mut reader = TcpStream::connect(format!("{}:{}", ipv4, port))
           .chain_err(|| format!("could not connect to {}:{}", ipv4.yellow(), port.yellow()))?;
         let mut writer = reader
           .try_clone()
@@ -206,17 +208,16 @@ fn main() {
           Ok(())
         });
         // The reader.
-        thread::spawn(|| -> Result<()> {
+        thread::spawn(move || -> Result<()> {
           let mut buf = String::new();
-          for c in reader.chars() {
-            match c.unwrap_or(REPLACEMENT_CHARACTER) {
-              '\n' => {
-                println!("{} {}", "remote:".blue().bold(), buf);
-                buf.clear()
-              }
-              c => buf.push(c),
-            }
-          }
+          reader
+            .read_to_string(&mut buf)
+            .chain_err(|| "utf8 unpacking went wrong")
+            .and_then(|_| {
+              println!("{} {}", "remote:".blue().bold(), buf);
+              buf.clear();
+              Ok(())
+            })?;
           Ok(())
         });
         // We must wait for the writing thread to terminate; otherwise,
