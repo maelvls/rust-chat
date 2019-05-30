@@ -12,7 +12,7 @@ extern crate log;
 use colored::Colorize;
 use log::{Level, LevelFilter, Metadata, Record};
 use std::io::Read;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::sync::mpsc;
@@ -159,26 +159,31 @@ fn main() {
           // The reader for this incoming connection. He receives the messages
           // from the connection and passes them to the main_writer.
           thread::spawn(move || -> Result<()> {
-            let mut buf = String::new();
-
             // Note: `Read::chars()` has been removed. See:
             // https://github.com/rust-lang/rust/issues/27802#issuecomment-377537778
             // I wanted a quick fix, so I used `::io::Read::read_to_string`
             // but it does allow replacing wrong utf-8 code points with the
             // replacement character (`�`). The good option would be to use
             // the utf8 crate and mimic the `reader.chars()` behaviour.
-            reader
-              .read_to_string(&mut buf)
-              .chain_err(|| "utf8 unpacking went wrong")
-              .and_then(|_| {
-                debug!("reader n°{} received '{}'", id, buf.yellow());
-                let sender = writer_send.clone();
-                reader_send
-                  .send(Action::ToWriters(buf.clone(), Writer { sender, id }))
-                  .chain_err(|| "when sending to writers")?;
-                buf.clear();
-                Ok(buf.as_str())
-              })?;
+            //Replacement: reader.read_to_string(&mut buf);
+            let reader_buf = BufReader::new(reader);
+            for line in reader_buf.lines() {
+              match line {
+                Ok(l) => {
+                  debug!("reader n°{} received '{}'", id, l.yellow());
+                  let sender = writer_send.clone();
+                  reader_send
+                    .send(Action::ToWriters(l, Writer { sender, id }))
+                    .chain_err(|| "")?;
+                }
+                Err(e) => {
+                  error!(
+                    "reader n°{} received a line with a wrong utf8 seq '{}'",
+                    id, e
+                  );
+                }
+              }
+            }
             Ok(())
           });
         }
@@ -214,15 +219,19 @@ fn main() {
         });
         // The reader.
         thread::spawn(move || -> Result<()> {
-          let mut buf = String::new();
-          reader
-            .read_to_string(&mut buf)
-            .chain_err(|| "utf8 unpacking went wrong")
-            .and_then(|_| {
-              println!("{} {}", "remote:".blue().bold(), buf);
-              buf.clear();
-              Ok(())
-            })?;
+          let reader_buf = BufReader::new(reader);
+          for line in reader_buf.lines() {
+            match line {
+              Ok(l) => println!("{} {}", "remote:".blue().bold(), l),
+              Err(e) => {
+                error!(
+                  "{} received a line with a wrong utf8 seq: '{}'",
+                  "remote:".blue().bold(),
+                  e
+                );
+              }
+            }
+          }
           Ok(())
         });
         // We must wait for the writing thread to terminate; otherwise,
