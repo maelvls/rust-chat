@@ -72,7 +72,7 @@ fn main() {
     (about: env!("CARGO_PKG_DESCRIPTION"))
     (@subcommand client =>
         (about: "run as client")
-        (@arg IPV4: +required "IP address to use")
+        (@arg ADDRESS: +required "address to use")
         (@arg PORT: +required "Port"))
     (@subcommand server =>
         (about: "run as server")
@@ -185,12 +185,17 @@ fn main() {
       }
 
       ("client", Some(subarg)) => {
-        let (ipv4, port) = (
-          subarg.value_of("IPV4").unwrap(),
+        let (address, port) = (
+          subarg.value_of("ADDRESS").unwrap(),
           subarg.value_of("PORT").unwrap(),
         );
-        let mut reader = TcpStream::connect(format!("{}:{}", ipv4, port))
-          .chain_err(|| format!("could not connect to {}:{}", ipv4.yellow(), port.yellow()))?;
+        let mut reader = TcpStream::connect(format!("{}:{}", address, port)).chain_err(|| {
+          format!(
+            "could not connect to {}:{}",
+            address.yellow(),
+            port.yellow()
+          )
+        })?;
         let mut writer = reader
           .try_clone()
           .chain_err(|| "impossibe to clone the TCP stream (i.e., the socket")?;
