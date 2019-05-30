@@ -161,6 +161,9 @@ fn main() {
           // from the connection and passes them to the main_writer.
           thread::spawn(move || -> Result<()> {
             let mut buf = String::new();
+            // Mael: Read::chars() has been removed. See:
+            // https://github.com/rust-lang/rust/issues/27802#issuecomment-377537778
+            //Replacement: reader.read_to_string(&mut buf);
             for c in reader.chars() {
               match c.unwrap_or(std::char::REPLACEMENT_CHARACTER) {
                 '\n' => {
