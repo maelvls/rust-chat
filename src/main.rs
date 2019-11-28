@@ -93,7 +93,7 @@ fn main() {
           .chain_err(|| format!("port '{}' aleady used", port.yellow()))?;
         info!("listening started");
 
-        let (reader_send, mut to_main_writer) = mpsc::channel();
+        let (reader_send, to_main_writer) = mpsc::channel();
 
         // The 'main_writer' is the one who takes input from one of
         // incoming connections (from one of the readers) and send them
@@ -142,7 +142,7 @@ fn main() {
           info!("incoming connection n°{}", id);
 
           let mut writer: TcpStream = stream.unwrap();
-          let mut reader: TcpStream = writer.try_clone().unwrap();
+          let reader: TcpStream = writer.try_clone().unwrap();
 
           // The writer for this incoming connection. He is responsible for
           // sending the messages given by main_writer to the connection.
@@ -194,7 +194,7 @@ fn main() {
           subarg.value_of("ADDRESS").unwrap(),
           subarg.value_of("PORT").unwrap(),
         );
-        let mut reader = TcpStream::connect(format!("{}:{}", address, port)).chain_err(|| {
+        let reader = TcpStream::connect(format!("{}:{}", address, port)).chain_err(|| {
           format!(
             "could not connect to {}:{}",
             address.yellow(),
